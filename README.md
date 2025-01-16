@@ -17,6 +17,7 @@
 1. Fork the repository and clone it to your local machine.
 2. Make sure you have Go installed on your machine. You can download it from the official website: <https://golang.org/dl/>
 3. Navigate to the root of the project and run `go mod download` to download the necessary dependencies.
+4. Make sure [buildctl](https://github.com/moby/buildkit) is installed and buildkitd is running.
 
 ### `zbpack`
 
@@ -30,7 +31,7 @@ You should see the `build plan` block and the subsequent `build log` block. The 
 Use `-i` or `--info` to show the build plan only.
 
 ```bash
-$ ./zbpack --info ./tests/node-corepack
+$ ./zbpack --info corepack-project
 
 ╔══════════════════════════ Build Plan ═════════════════════════╗
 ║ provider         │ nodejs                                     ║

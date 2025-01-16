@@ -3,71 +3,51 @@ package rust
 
 import (
 	"bytes"
-	"log"
-	"os"
 	"strings"
 	"text/template"
 
 	_ "embed"
-
-	"github.com/spf13/afero"
 
 	"github.com/zeabur/zbpack/pkg/packer"
 	"github.com/zeabur/zbpack/pkg/types"
 )
 
 //go:embed template.Dockerfile
-var templateDockerfile string
+var dockerTemplate string
 
-// GetMetaOptions is the options for GetMeta.
-type GetMetaOptions struct {
-	Src afero.Fs
+// TemplateContext is the context for the Dockerfile template.
+type TemplateContext struct {
+	OpenSSL    bool
+	Serverless bool
+	Entry      string
+	AppDir     string
+	Assets     []string
 
-	// In Rust, the submodule name is the binary name.
-	SubmoduleName string
-}
-
-func needOpenssl(source afero.Fs) bool {
-	for _, file := range []string{"Cargo.toml", "Cargo.lock"} {
-		file, err := afero.ReadFile(source, file)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				log.Println(err)
-			}
-			continue
-		}
-
-		if strings.Contains(string(file), "openssl") {
-			return true
-		}
-	}
-	return false
-}
-
-// GetMeta gets the metadata of the Rust project.
-func GetMeta(options GetMetaOptions) types.PlanMeta {
-	var opensslFlag string
-	if needOpenssl(options.Src) {
-		opensslFlag = "yes"
-	} else {
-		opensslFlag = "no"
-	}
-
-	return types.PlanMeta{
-		"BinName":     options.SubmoduleName,
-		"NeedOpenssl": opensslFlag,
-	}
+	BuildCommand    string
+	StartCommand    string
+	PreStartCommand string
 }
 
 // GenerateDockerfile generates the Dockerfile for the Rust project.
 func GenerateDockerfile(meta types.PlanMeta) (string, error) {
 	template := template.Must(
-		template.New("RustDockerfile").Parse(templateDockerfile),
+		template.New("RustDockerfile").Parse(dockerTemplate),
 	)
+
+	context := TemplateContext{
+		OpenSSL:         meta["openssl"] == "true",
+		Serverless:      meta["serverless"] == "true",
+		Entry:           meta["entry"],
+		AppDir:          meta["appDir"],
+		Assets:          strings.FieldsFunc(meta["assets"], func(r rune) bool { return r == ':' }),
+		BuildCommand:    meta["buildCommand"],
+		StartCommand:    meta["startCommand"],
+		PreStartCommand: meta["preStartCommand"],
+	}
 
 	var result bytes.Buffer
 
-	if err := template.Execute(&result, meta); err != nil {
+	if err := template.Execute(&result, context); err != nil {
 		return "", err
 	}
 

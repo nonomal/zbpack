@@ -1,0 +1,13 @@
+PlanType: nodejs
+
+Meta:
+  appDir: ""
+  buildCmd: "yarn build"
+  bun: "false"
+  framework: "hexo"
+  installCmd: "COPY . .\nRUN yarn install"
+  nodeVersion: "20"
+  outputDir: "public"
+  packageManager: "yarn"
+  serverless: "true"
+  startCmd: ""

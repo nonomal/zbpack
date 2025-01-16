@@ -6,14 +6,16 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/zeabur/zbpack/internal/php"
+	"github.com/zeabur/zbpack/pkg/plan"
 	"github.com/zeabur/zbpack/pkg/types"
 )
 
 // TODO: coverage of GetPHPVersion
 func TestGetPHPVersion_NoComposer(t *testing.T) {
 	fs := afero.NewMemMapFs()
+	config := plan.NewProjectConfigurationFromFs(fs, "")
 
-	v := php.GetPHPVersion(fs)
+	v := php.GetPHPVersion(config, fs)
 	assert.Equal(t, v, php.DefaultPHPVersion)
 }
 
@@ -22,8 +24,9 @@ func TestGetPHPVersion_NoVersion(t *testing.T) {
 	_ = afero.WriteFile(fs, "composer.json", []byte(`{
 		"name": "test"
 	}`), 0o644)
+	config := plan.NewProjectConfigurationFromFs(fs, "")
 
-	v := php.GetPHPVersion(fs)
+	v := php.GetPHPVersion(config, fs)
 	assert.Equal(t, v, php.DefaultPHPVersion)
 }
 
@@ -35,8 +38,9 @@ func TestGetPHPVersion_EmptyVersion(t *testing.T) {
 			"php": ""
 		}
 	}`), 0o644)
+	config := plan.NewProjectConfigurationFromFs(fs, "")
 
-	v := php.GetPHPVersion(fs)
+	v := php.GetPHPVersion(config, fs)
 	assert.Equal(t, v, php.DefaultPHPVersion)
 }
 
@@ -99,32 +103,33 @@ func TestDetermineProjectFramework_Unknown(t *testing.T) {
 	assert.Equal(t, framework, types.PHPFrameworkNone)
 }
 
-func TestDetermineApplication_NoComposer(t *testing.T) {
-	fs := afero.NewMemMapFs()
+func TestDetermineStartCommand_CustomInConfig(t *testing.T) {
+	const expectedCommand = "php artisan serve; _startup"
 
-	app, kind := php.DetermineApplication(fs)
-	assert.Equal(t, app, types.PHPApplicationDefault)
-	assert.Equal(t, types.PHPPropertyNone, kind&types.PHPPropertyComposer)
+	config := plan.NewProjectConfigurationFromFs(afero.NewMemMapFs(), "")
+	config.Set(plan.ConfigStartCommand, expectedCommand)
+
+	actualCommand := php.DetermineStartCommand(config)
+
+	assert.Contains(t, actualCommand, expectedCommand)
 }
 
-func TestDetermineApplication_UnknownWithComposer(t *testing.T) {
+func TestDetermineBuildCommand_Default(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	_ = afero.WriteFile(fs, "composer.json", []byte(`{
-		"name": "test"
-	}`), 0o644)
+	config := plan.NewProjectConfigurationFromFs(fs, "")
+	command := php.DetermineBuildCommand(config)
 
-	app, kind := php.DetermineApplication(fs)
-	assert.Equal(t, app, types.PHPApplicationDefault)
-	assert.NotEqual(t, types.PHPPropertyNone, kind&types.PHPPropertyComposer)
+	assert.Equal(t, "", command)
 }
 
-func TestDetermineApplication_AcgFaka(t *testing.T) {
-	fs := afero.NewMemMapFs()
-	_ = afero.WriteFile(fs, "composer.json", []byte(`{
-		"name": "lizhipay/acg-faka"
-	}`), 0o644)
+func TestDetermineBuildCommand_CustomInConfig(t *testing.T) {
+	const expectedCommand = "php bin/build"
 
-	app, kind := php.DetermineApplication(fs)
-	assert.Equal(t, app, types.PHPApplicationAcgFaka)
-	assert.NotEqual(t, types.PHPPropertyNone, kind&types.PHPPropertyComposer)
+	fs := afero.NewMemMapFs()
+	config := plan.NewProjectConfigurationFromFs(fs, "")
+	config.Set(plan.ConfigBuildCommand, expectedCommand)
+
+	actualCommand := php.DetermineBuildCommand(config)
+
+	assert.Equal(t, expectedCommand, actualCommand)
 }

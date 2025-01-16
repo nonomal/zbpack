@@ -2,6 +2,7 @@ package python
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -13,12 +14,22 @@ import (
 	"github.com/zeabur/zbpack/pkg/types"
 )
 
+func TestMain(m *testing.M) {
+	v := m.Run()
+
+	// After all tests have run `go-snaps` will sort snapshots
+	snaps.Clean(m, snaps.CleanOpts{Sort: true})
+
+	os.Exit(v)
+}
+
 func TestPackageManager_Pip(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	_ = afero.WriteFile(fs, "requirements.txt", nil, 0o644)
 
 	ctx := &pythonPlanContext{
-		Src: fs,
+		Src:    fs,
+		Config: plan.NewProjectConfigurationFromFs(fs, ""),
 	}
 	pm := DeterminePackageManager(ctx)
 
@@ -30,7 +41,8 @@ func TestPackageManager_Pipenv(t *testing.T) {
 	_ = afero.WriteFile(fs, "Pipfile", nil, 0o644)
 
 	ctx := &pythonPlanContext{
-		Src: fs,
+		Src:    fs,
+		Config: plan.NewProjectConfigurationFromFs(fs, ""),
 	}
 	pm := DeterminePackageManager(ctx)
 
@@ -61,7 +73,8 @@ build-backend = "poetry.core.masonry.api"
 `)), 0o644)
 
 	ctx := &pythonPlanContext{
-		Src: fs,
+		Src:    fs,
+		Config: plan.NewProjectConfigurationFromFs(fs, ""),
 	}
 	pm := DeterminePackageManager(ctx)
 
@@ -88,11 +101,61 @@ license = {text = "MIT"}
 	_ = afero.WriteFile(fs, "pdm.lock", nil, 0o644)
 
 	ctx := &pythonPlanContext{
-		Src: fs,
+		Src:    fs,
+		Config: plan.NewProjectConfigurationFromFs(fs, ""),
 	}
 	pm := DeterminePackageManager(ctx)
 
 	assert.Equal(t, types.PythonPackageManagerPdm, pm)
+}
+
+func TestPackageManager_Rye(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	_ = afero.WriteFile(fs, "pyproject.toml", []byte(strings.TrimSpace(`
+[project]
+name = ""
+version = ""
+description = ""
+authors = [
+    {name = "", email = ""},
+]
+dependencies = [
+    "flask>=2.3.2",
+]
+requires-python = ">=3.8"
+license = {text = "MIT"}
+
+`)), 0o644)
+	_ = afero.WriteFile(fs, "requirements.lock", nil, 0o644)
+
+	ctx := &pythonPlanContext{
+		Src:    fs,
+		Config: plan.NewProjectConfigurationFromFs(fs, ""),
+	}
+	pm := DeterminePackageManager(ctx)
+
+	assert.Equal(t, types.PythonPackageManagerRye, pm)
+}
+
+func TestPackageManager_Uv(t *testing.T) {
+	t.Parallel()
+
+	t.Run("contains uv.lock", func(t *testing.T) {
+		t.Parallel()
+
+		fs := afero.NewMemMapFs()
+		_ = afero.WriteFile(fs, "pyproject.toml", nil, 0o644)
+		_ = afero.WriteFile(fs, "uv.lock", nil, 0o644)
+
+		ctx := &pythonPlanContext{
+			Src:    fs,
+			Config: plan.NewProjectConfigurationFromFs(fs, ""),
+		}
+
+		pm := DeterminePackageManager(ctx)
+
+		assert.Equal(t, types.PythonPackageManagerUv, pm)
+	})
 }
 
 func TestPackageManager_PoetryWithOldRequirements(t *testing.T) {
@@ -119,7 +182,8 @@ build-backend = "poetry.core.masonry.api"
 	_ = afero.WriteFile(fs, "requirements.txt", nil, 0o644)
 
 	ctx := &pythonPlanContext{
-		Src: fs,
+		Src:    fs,
+		Config: plan.NewProjectConfigurationFromFs(fs, ""),
 	}
 	pm := DeterminePackageManager(ctx)
 
@@ -147,7 +211,8 @@ license = {text = "MIT"}
 	_ = afero.WriteFile(fs, "requirements.txt", nil, 0o644)
 
 	ctx := &pythonPlanContext{
-		Src: fs,
+		Src:    fs,
+		Config: plan.NewProjectConfigurationFromFs(fs, ""),
 	}
 	pm := DeterminePackageManager(ctx)
 
@@ -160,7 +225,8 @@ func TestPackageManager_PipenvWithOldRequirements(t *testing.T) {
 	_ = afero.WriteFile(fs, "requirements.txt", nil, 0o644)
 
 	ctx := &pythonPlanContext{
-		Src: fs,
+		Src:    fs,
+		Config: plan.NewProjectConfigurationFromFs(fs, ""),
 	}
 	pm := DeterminePackageManager(ctx)
 
@@ -173,7 +239,8 @@ func TestPackageManager_PipenvWithOldRequirements_FixedOrder(t *testing.T) {
 	_ = afero.WriteFile(fs, "requirements.txt", nil, 0o644)
 
 	ctx := &pythonPlanContext{
-		Src: fs,
+		Src:    fs,
+		Config: plan.NewProjectConfigurationFromFs(fs, ""),
 	}
 
 	for i := 0; i < 1_000; i++ {
@@ -183,10 +250,46 @@ func TestPackageManager_PipenvWithOldRequirements_FixedOrder(t *testing.T) {
 	}
 }
 
+func TestPackageManager_Specified(t *testing.T) {
+	t.Parallel()
+
+	supportedPackageManagers := []types.PythonPackageManager{
+		types.PythonPackageManagerPip,
+		types.PythonPackageManagerPipenv,
+		types.PythonPackageManagerPoetry,
+		types.PythonPackageManagerPdm,
+		types.PythonPackageManagerRye,
+		types.PythonPackageManagerUv,
+	}
+
+	for _, pm := range supportedPackageManagers {
+		pm := pm
+
+		t.Run(string(pm), func(t *testing.T) {
+			t.Parallel()
+
+			fs := afero.NewMemMapFs()
+			config := plan.NewProjectConfigurationFromFs(fs, "")
+
+			config.Set(ConfigPythonPackageManager, string(pm))
+
+			ctx := pythonPlanContext{
+				Src:    fs,
+				Config: config,
+			}
+
+			determinedPm := DeterminePackageManager(&ctx)
+
+			assert.Equal(t, pm, determinedPm)
+		})
+	}
+}
+
 func TestDetermineInstallCmd_Snapshot(t *testing.T) {
 	const (
 		WithWsgi              = "with-wsgi"
 		WithFastapi           = "with-fastapi"
+		WithTornado           = "with-tornado"
 		WithStaticDjango      = "with-static-django"
 		WithStaticNginx       = "with-static-nginx"
 		WithStaticNginxDjango = "with-static-nginx-django"
@@ -205,6 +308,7 @@ func TestDetermineInstallCmd_Snapshot(t *testing.T) {
 		for _, mode := range []string{
 			WithWsgi,
 			WithFastapi,
+			WithTornado,
 			WithStaticNginx,
 			WithStaticDjango,
 			WithStaticNginxDjango,
@@ -234,6 +338,10 @@ func TestDetermineInstallCmd_Snapshot(t *testing.T) {
 					ctx.Framework = optional.Some(types.PythonFrameworkFastapi)
 				} else {
 					ctx.Framework = optional.Some(types.PythonFrameworkNone)
+				}
+
+				if mode == WithTornado {
+					ctx.Framework = optional.Some(types.PythonFrameworkTornado)
 				}
 
 				if mode == WithStaticNginx {
@@ -338,6 +446,7 @@ func TestHasDependency_Unknown(t *testing.T) {
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerUnknown),
 	}
 
@@ -352,6 +461,7 @@ func TestHasDependency_Pip(t *testing.T) {
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPip),
 	}
 
@@ -365,6 +475,7 @@ func TestHasDependency_Poetry(t *testing.T) {
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPoetry),
 	}
 
@@ -378,6 +489,7 @@ func TestHasDependency_PoetryDep(t *testing.T) {
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPoetry),
 	}
 
@@ -391,6 +503,7 @@ func TestHasDependency_Pipenv(t *testing.T) {
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPipenv),
 	}
 
@@ -404,6 +517,7 @@ func TestHasDependency_PipenvDep(t *testing.T) {
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPipenv),
 	}
 
@@ -418,6 +532,7 @@ func TestHasDependency_Pipenv_WithObsoleteRequirements(t *testing.T) {
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPipenv),
 	}
 
@@ -432,6 +547,7 @@ func TestHasDependency_PipenvDep_WithObsoleteRequirements(t *testing.T) {
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPipenv),
 	}
 
@@ -445,6 +561,7 @@ func TestHasDependency_Pip_HasMysqlClient(t *testing.T) {
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPip),
 	}
 
@@ -457,6 +574,7 @@ func TestHasDependency_Pip_NoMysqlClient(t *testing.T) {
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPip),
 	}
 
@@ -472,6 +590,7 @@ mysqlclient = "*"
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPipenv),
 	}
 
@@ -513,6 +632,7 @@ func TestHasDependency_Pipenv_DependOnMysqlClient(t *testing.T) {
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPipenv),
 	}
 
@@ -557,6 +677,7 @@ mysqlalt = "*"
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPipenv),
 	}
 
@@ -572,6 +693,7 @@ mysqlclient = "^12.34.56"
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPoetry),
 	}
 
@@ -597,6 +719,7 @@ files = [
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPoetry),
 	}
 
@@ -622,6 +745,7 @@ files = [
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPoetry),
 	}
 
@@ -634,6 +758,7 @@ func TestHasDependency_CaseInsensitive(t *testing.T) {
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPip),
 	}
 
@@ -641,20 +766,67 @@ func TestHasDependency_CaseInsensitive(t *testing.T) {
 	assert.False(t, HasDependency(ctx, "bar"))
 }
 
-func TestHasDependencyWithFile_Pip(t *testing.T) {
+func TestHasDependency_Uv(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	_ = afero.WriteFile(fs, "pyproject.toml", []byte(`
+[project]
+name = "midexam"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.9.2",
+    "notebook>=7.2.2",
+    "pandas[output-formatting,performance,plot]>=2.2.3",
+    "polars[numpy,pandas,plot]>=1.13.1",
+    "scikit-learn>=1.5.2",
+    "seaborn>=0.13.2",
+]`), 0o644)
+	_ = afero.WriteFile(fs, "uv.lock", []byte(`version = 1
+requires-python = ">=3.12"
+
+[[package]]
+name = "altair"
+version = "5.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jinja2" },
+    { name = "jsonschema" },
+    { name = "narwhals" },
+    { name = "packaging" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ae/09/38904138a49f29e529b61b4f39954a6837f443d828c1bc57814be7bd4813/altair-5.4.1.tar.gz", hash = "sha256:0ce8c2e66546cb327e5f2d7572ec0e7c6feece816203215613962f0ec1d76a82", size = 636465 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9b/52/4a86a4fa1cc2aae79137cc9510b7080c3e5aede2310d14fae5486feec7f7/altair-5.4.1-py3-none-any.whl", hash = "sha256:0fb130b8297a569d08991fb6fe763582e7569f8a04643bbd9212436e3be04aef", size = 658150 },
+]`), 0o644)
+
+	ctx := &pythonPlanContext{
+		Src:    fs,
+		Config: plan.NewProjectConfigurationFromFs(fs, ""),
+	}
+
+	assert.True(t, HasDependency(ctx, "matplotlib"))
+	assert.True(t, HasDependency(ctx, "notebook"))
+	assert.True(t, HasDependency(ctx, "altair"))
+}
+
+func TestHasExplicitDependency_Pip(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	_ = afero.WriteFile(fs, "requirements.txt", []byte("foo"), 0o644)
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPip),
 	}
 
-	assert.True(t, HasDependencyWithFile(ctx, "foo"))
-	assert.False(t, HasDependencyWithFile(ctx, "bar"))
+	assert.True(t, HasExplicitDependency(ctx, "foo"))
+	assert.False(t, HasExplicitDependency(ctx, "bar"))
 }
 
-func TestHasDependencyWithFile_Pipenv(t *testing.T) {
+func TestHasExplicitDependency_Pipenv(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	_ = afero.WriteFile(fs, "Pipfile", []byte(`
 [[source]]
@@ -671,14 +843,15 @@ pytest = "*"`), 0o644)
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPipenv),
 	}
 
-	assert.True(t, HasDependencyWithFile(ctx, "requests"))
-	assert.False(t, HasDependencyWithFile(ctx, "bar"))
+	assert.True(t, HasExplicitDependency(ctx, "requests"))
+	assert.False(t, HasExplicitDependency(ctx, "bar"))
 }
 
-func TestHasDependencyWithFile_Poetry(t *testing.T) {
+func TestHasExplicitDependency_Poetry(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	_ = afero.WriteFile(fs, "pyproject.toml", []byte(`
 [tool.poetry]
@@ -700,14 +873,15 @@ build-backend = "poetry.core.masonry.api"`), 0o644)
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPoetry),
 	}
 
-	assert.True(t, HasDependencyWithFile(ctx, "fastapi"))
-	assert.False(t, HasDependencyWithFile(ctx, "bar"))
+	assert.True(t, HasExplicitDependency(ctx, "fastapi"))
+	assert.False(t, HasExplicitDependency(ctx, "bar"))
 }
 
-func TestHasDependencyWithFile_Pdm(t *testing.T) {
+func TestHasExplicitDependency_Pdm(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	_ = afero.WriteFile(fs, "pyproject.toml", []byte(`
 
@@ -726,22 +900,97 @@ license = {text = "MIT"}`), 0o644)
 
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerPdm),
 	}
 
-	assert.True(t, HasDependencyWithFile(ctx, "flask"))
-	assert.False(t, HasDependencyWithFile(ctx, "bar"))
+	assert.True(t, HasExplicitDependency(ctx, "flask"))
+	assert.False(t, HasExplicitDependency(ctx, "bar"))
 }
 
-func TestHasDependencyWithFile_Unknown(t *testing.T) {
+func TestHasExplicitDependency_Rye(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	_ = afero.WriteFile(fs, "pyproject.toml", []byte(`
+
+[project]
+name = ""
+version = ""
+description = ""
+authors = [
+    {name = "", email = ""},
+]
+dependencies = [
+    "flask>=2.3.2",
+]
+requires-python = ">=3.8"
+license = {text = "MIT"}`), 0o644)
+
+	ctx := &pythonPlanContext{
+		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
+		PackageManager: optional.Some(types.PythonPackageManagerRye),
+	}
+
+	assert.True(t, HasExplicitDependency(ctx, "flask"))
+	assert.False(t, HasExplicitDependency(ctx, "bar"))
+}
+
+func TestHasExplicitDependency_Uv(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	_ = afero.WriteFile(fs, "pyproject.toml", []byte(`
+[project]
+name = "midexam"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.9.2",
+    "notebook>=7.2.2",
+    "pandas[output-formatting,performance,plot]>=2.2.3",
+    "polars[numpy,pandas,plot]>=1.13.1",
+    "scikit-learn>=1.5.2",
+    "seaborn>=0.13.2",
+]`), 0o644)
+	_ = afero.WriteFile(fs, "uv.lock", []byte(`version = 1
+requires-python = ">=3.12"
+
+[[package]]
+name = "altair"
+version = "5.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jinja2" },
+    { name = "jsonschema" },
+    { name = "narwhals" },
+    { name = "packaging" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ae/09/38904138a49f29e529b61b4f39954a6837f443d828c1bc57814be7bd4813/altair-5.4.1.tar.gz", hash = "sha256:0ce8c2e66546cb327e5f2d7572ec0e7c6feece816203215613962f0ec1d76a82", size = 636465 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9b/52/4a86a4fa1cc2aae79137cc9510b7080c3e5aede2310d14fae5486feec7f7/altair-5.4.1-py3-none-any.whl", hash = "sha256:0fb130b8297a569d08991fb6fe763582e7569f8a04643bbd9212436e3be04aef", size = 658150 },
+]`), 0o644)
+
+	ctx := &pythonPlanContext{
+		Src:    fs,
+		Config: plan.NewProjectConfigurationFromFs(fs, ""),
+	}
+
+	assert.True(t, HasExplicitDependency(ctx, "matplotlib"))
+	assert.True(t, HasExplicitDependency(ctx, "notebook"))
+	assert.False(t, HasExplicitDependency(ctx, "altair"))
+}
+
+func TestHasExplicitDependency_Unknown(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	ctx := &pythonPlanContext{
 		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
 		PackageManager: optional.Some(types.PythonPackageManagerUnknown),
 	}
 
-	assert.False(t, HasDependencyWithFile(ctx, "flask"))
-	assert.False(t, HasDependencyWithFile(ctx, "bar"))
+	assert.False(t, HasExplicitDependency(ctx, "flask"))
+	assert.False(t, HasExplicitDependency(ctx, "bar"))
 }
 
 func TestDetermineStreamlitEntry_ByFile(t *testing.T) {
@@ -820,4 +1069,200 @@ st.write(x, "squared is", x * x)`), 0o644)
 
 	assert.Equal(t, "zeabur_streamlit_demo.py", determineStreamlitEntry(ctx))
 	assert.Equal(t, "zeabur_streamlit_demo.py", ctx.StreamlitEntry.Unwrap())
+}
+
+func TestDetermineWsgi(t *testing.T) {
+	t.Parallel()
+
+	matchedCases := []string{
+		"app = FastAPI()",
+		"    app = FastAPI()",
+		"app = FastAPI(\n\t# test\n)",
+		"app=FastAPI(\n\tname='app'\n)",
+	}
+
+	notMatchedCases := []string{
+		"app = FastAPI",
+		"# FastAPI test",
+		"# app = FastAPI test",
+		"app=FastAPI",
+	}
+
+	for _, c := range matchedCases {
+		c := c
+
+		t.Run("matched-"+c, func(t *testing.T) {
+			t.Parallel()
+
+			fs := afero.NewMemMapFs()
+			_ = afero.WriteFile(fs, "main.py", []byte(c), 0o644)
+
+			ctx := &pythonPlanContext{
+				Src:            fs,
+				Config:         plan.NewProjectConfigurationFromFs(fs, ""),
+				PackageManager: optional.Some(types.PythonPackageManagerUnknown),
+				Framework:      optional.Some(types.PythonFrameworkFastapi),
+			}
+
+			assert.Equal(t, "main:app", DetermineWsgi(ctx))
+		})
+	}
+
+	for _, c := range notMatchedCases {
+		c := c
+		t.Run("not-matched-"+c, func(t *testing.T) {
+			t.Parallel()
+
+			fs := afero.NewMemMapFs()
+			_ = afero.WriteFile(fs, "main.py", []byte(c), 0o644)
+
+			ctx := &pythonPlanContext{
+				Src:            fs,
+				Config:         plan.NewProjectConfigurationFromFs(fs, ""),
+				PackageManager: optional.Some(types.PythonPackageManagerUnknown),
+				Framework:      optional.Some(types.PythonFrameworkFastapi),
+			}
+
+			assert.Equal(t, "", DetermineWsgi(ctx))
+		})
+	}
+}
+
+func TestDeterminePythonVersion_Pipenv(t *testing.T) {
+	t.Parallel()
+
+	pipFile := []struct {
+		testname string
+		content  string
+		expect   string
+	}{
+		{
+			testname: "python_version with spaces",
+			content: strings.TrimSpace(`
+[[source]]
+url = "https://pypi.python.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[requires]
+python_version = "3.8"
+`),
+			expect: "3.8",
+		},
+		{
+			testname: "python_version without spaces",
+			content: strings.TrimSpace(`
+[[source]]
+url = "https://pypi.python.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[requires]
+python_version="3.8"
+`),
+			expect: "3.8",
+		},
+		{
+			testname: "python_version with two digit minor version",
+			content: strings.TrimSpace(`
+[[source]]
+url = "https://pypi.python.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[requires]
+python_version = "3.12"
+`),
+			expect: "3.12",
+		},
+	}
+
+	for _, p := range pipFile {
+		p := p
+		t.Run(p.testname, func(t *testing.T) {
+			t.Parallel()
+
+			fs := afero.NewMemMapFs()
+			_ = afero.WriteFile(fs, "Pipfile", []byte(p.content), 0o644)
+
+			ctx := &pythonPlanContext{
+				Src:    fs,
+				Config: plan.NewProjectConfigurationFromFs(fs, ""),
+			}
+
+			assert.Equal(t, p.expect, determinePythonVersion(ctx))
+		})
+	}
+}
+
+func TestDeterminePythonVersion_Customized(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	conf := plan.NewProjectConfigurationFromFs(fs, "")
+	conf.Set(ConfigPythonVersion, "3.12345.1")
+
+	ctx := &pythonPlanContext{
+		Src:    fs,
+		Config: conf,
+	}
+
+	assert.Equal(t, "3.12345", determinePythonVersion(ctx))
+}
+
+func TestDetermineAptDependencies_Nodejs(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	_ = afero.WriteFile(fs, "package.json", []byte("{}"), 0o644)
+
+	ctx := &pythonPlanContext{
+		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
+		PackageManager: optional.Some(types.PythonPackageManagerUnknown),
+	}
+
+	assert.Contains(t, determineAptDependencies(ctx), "nodejs")
+	assert.Contains(t, determineAptDependencies(ctx), "npm")
+}
+
+func TestDetermineBuildCommand_NPMBuild(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	_ = afero.WriteFile(fs, "package.json", []byte(`{"scripts": {"build": "echo 'hi'"}}`), 0o644)
+
+	ctx := &pythonPlanContext{
+		Src:            fs,
+		Config:         plan.NewProjectConfigurationFromFs(fs, ""),
+		PackageManager: optional.Some(types.PythonPackageManagerUnknown),
+	}
+
+	assert.Contains(t, determineBuildCmd(ctx), "npm install && npm run build")
+}
+
+func TestDetermineBuildCommand_Custom(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	_ = afero.WriteFile(fs, "package.json", []byte(`{"scripts": {"build": "echo 'hi'"}}`), 0o644)
+
+	config := plan.NewProjectConfigurationFromFs(fs, "")
+	config.Set(plan.ConfigBuildCommand, "echo 'hello'")
+
+	ctx := &pythonPlanContext{
+		Src:            fs,
+		Config:         config,
+		PackageManager: optional.Some(types.PythonPackageManagerUnknown),
+	}
+
+	assert.Contains(t, determineBuildCmd(ctx), "echo 'hello'")
+}
+
+func TestDetermineStartCommand_Custom(t *testing.T) {
+	fs := afero.NewMemMapFs()
+
+	config := plan.NewProjectConfigurationFromFs(fs, "")
+	config.Set(plan.ConfigStartCommand, "echo 'hello'")
+
+	ctx := &pythonPlanContext{
+		Src:            fs,
+		Config:         config,
+		PackageManager: optional.Some(types.PythonPackageManagerUnknown),
+	}
+
+	assert.Contains(t, determineStartCmd(ctx), "echo 'hello'")
+	assert.Contains(t, determineStartCmd(ctx), "_startup()") // should have the default startup function
 }

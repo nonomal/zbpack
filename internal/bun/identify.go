@@ -22,27 +22,48 @@ func (i *identify) PlanType() types.PlanType {
 }
 
 func (i *identify) Match(fs afero.Fs) bool {
-	hasPackageJSON := utils.HasFile(fs, "package.json")
-	hasBunLockfile := utils.HasFile(fs, "bun.lockb")
-	hasBunTypes := false
-
-	packageJSON, err := afero.ReadFile(fs, "package.json")
-	if err == nil {
-		hasBunTypes = bytes.Contains(packageJSON, []byte(`"bun-types"`))
+	strategies := []func() bool{
+		// has bun lockfile
+		func() bool {
+			return utils.HasFile(fs, "bun.lockb") || utils.HasFile(fs, "bun.lock")
+		},
+		// has .bun-version
+		func() bool {
+			return utils.HasFile(fs, ".bun-version")
+		},
+		// has bun types
+		func() bool {
+			packageJSON, err := utils.ReadFileToUTF8(fs, "package.json")
+			if err != nil {
+				return false
+			}
+			return bytes.Contains(packageJSON, []byte(`"bun-types"`))
+		},
+		// has bun@ (engine)
+		func() bool {
+			packageJSON, err := utils.ReadFileToUTF8(fs, "package.json")
+			if err != nil {
+				return false
+			}
+			return bytes.Contains(packageJSON, []byte(`bun@`))
+		},
 	}
 
-	return hasPackageJSON && (hasBunLockfile || hasBunTypes)
+	for _, strategy := range strategies {
+		if strategy() {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (i *identify) PlanMeta(options plan.NewPlannerOptions) types.PlanMeta {
 	return GetMeta(
 		GetMetaOptions{
-			Src:            options.Source,
-			Config:         options.Config,
-			CustomBuildCmd: options.CustomBuildCommand,
-			CustomStartCmd: options.CustomStartCommand,
-			OutputDir:      options.OutputDir,
-			Bun:            true,
+			Src:    options.Source,
+			Config: options.Config,
+			Bun:    true,
 		},
 	)
 }

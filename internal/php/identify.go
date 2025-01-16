@@ -1,11 +1,10 @@
 package php
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/spf13/afero"
-	"github.com/spf13/cast"
-
 	"github.com/zeabur/zbpack/internal/utils"
 	"github.com/zeabur/zbpack/pkg/plan"
 	"github.com/zeabur/zbpack/pkg/types"
@@ -29,24 +28,23 @@ func (i *identify) Match(fs afero.Fs) bool {
 func (i *identify) PlanMeta(options plan.NewPlannerOptions) types.PlanMeta {
 	config := options.Config
 
-	server := plan.Cast(config.Get(ConfigLaravelOctaneServer), cast.ToStringE).TakeOr("")
-
 	framework := DetermineProjectFramework(options.Source)
-	phpVersion := GetPHPVersion(options.Source)
-	deps := DetermineAptDependencies(options.Source, server)
-	app, property := DetermineApplication(options.Source)
+	phpVersion := GetPHPVersion(config, options.Source)
+	deps := DetermineAptDependencies(options.Source)
+	exts := DeterminePHPExtensions(options.Source)
+	buildCommand := DetermineBuildCommand(options.Config)
+	startCommand := DetermineStartCommand(options.Config)
+	phpOptimize := DeterminePHPOptimize(options.Config)
 
 	// Some meta will be added to the plan dynamically later.
 	meta := types.PlanMeta{
-		"framework":  string(framework),
-		"phpVersion": phpVersion,
-		"deps":       strings.Join(deps, " "),
-		"app":        string(app),
-		"property":   PropertyToString(property),
-	}
-
-	if framework == types.PHPFrameworkLaravel && server != "" {
-		meta["octaneServer"] = server
+		"framework":    string(framework),
+		"phpVersion":   phpVersion,
+		"deps":         strings.Join(deps, " "),
+		"exts":         strings.Join(exts, " "),
+		"buildCommand": buildCommand,
+		"startCommand": startCommand,
+		"optimize":     strconv.FormatBool(phpOptimize),
 	}
 
 	return meta

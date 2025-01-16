@@ -1,8 +1,14 @@
 package zeaburpack
 
 import (
+	"log"
+	"os"
+	"path"
+	"path/filepath"
 	"strings"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/samber/lo"
 	"github.com/spf13/afero"
 	"github.com/zeabur/zbpack/pkg/plan"
@@ -23,26 +29,41 @@ type PlanOptions struct {
 	// Access token for GitHub, only used when Path is a GitHub URL.
 	AccessToken *string
 
-	// CustomBuildCommand is a custom build command that will be used instead of the default one.
-	CustomBuildCommand *string
-
-	// CustomStartCommand is a custom start command that will be used instead of the default one.
-	CustomStartCommand *string
-
-	// OutputDir is the directory where the build artifacts will be stored.
-	// Once provided, the service will deploy as static files with nginx.
-	OutputDir *string
+	// AWSConfig is the AWS configuration to access S3, required if Path is an S3 URL.
+	AWSConfig *plan.AWSConfig
 }
 
 // Plan returns the build plan and metadata.
 func Plan(opt PlanOptions) (types.PlanType, types.PlanMeta) {
+	wd, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+
+	if opt.Path == nil || *opt.Path == "" {
+		opt.Path = &wd
+	} else if !filepath.IsAbs(*opt.Path) && !strings.HasPrefix(*opt.Path, "https://") && !strings.HasPrefix(*opt.Path, "s3://") {
+		p := path.Join(wd, *opt.Path)
+		opt.Path = &p
+	}
+
 	var src afero.Fs
 	if strings.HasPrefix(*opt.Path, "https://github.com") {
 		var err error
-		src, err = getGitHubSourceFromURL(*opt.Path, *opt.AccessToken)
+		src, err = getGitHubSourceFromURL(*opt.Path, opt.AccessToken)
 		if err != nil {
-			panic(err)
+			log.Printf("unexpected github source: %v\n", err)
+			return types.PlanTypeStatic, types.PlanMeta{"error": "unexpected github source", "details": err.Error()}
 		}
+	} else if strings.HasPrefix(*opt.Path, "s3://") {
+		if opt.AWSConfig == nil {
+			return types.PlanTypeStatic, types.PlanMeta{"error": "Missing AWS configuration, cannot access S3 source"}
+		}
+
+		src = getS3SourceFromURL(*opt.Path, &aws.Config{
+			Region:      aws.String(opt.AWSConfig.Region),
+			Credentials: credentials.NewStaticCredentials(opt.AWSConfig.AccessKeyID, opt.AWSConfig.SecretAccessKey, ""),
+		})
 	} else {
 		src = afero.NewBasePathFs(afero.NewOsFs(), *opt.Path)
 	}
@@ -50,20 +71,37 @@ func Plan(opt PlanOptions) (types.PlanType, types.PlanMeta) {
 	submoduleName := lo.FromPtrOr(opt.SubmoduleName, "")
 	config := plan.NewProjectConfigurationFromFs(src, submoduleName)
 
-	UpdateOptionsOnConfig(&opt, config)
-
 	planner := plan.NewPlanner(
 		&plan.NewPlannerOptions{
-			Source:             src,
-			Config:             config,
-			CustomBuildCommand: opt.CustomBuildCommand,
-			CustomStartCommand: opt.CustomStartCommand,
-			OutputDir:          opt.OutputDir,
-			SubmoduleName:      submoduleName,
+			Source:        src,
+			Config:        config,
+			SubmoduleName: submoduleName,
 		},
-		SupportedIdentifiers()...,
+		SupportedIdentifiers(config)...,
 	)
 
 	t, m := planner.Plan()
 	return t, m
+}
+
+// PlanAndOutputDockerfile output dockerfile.
+func PlanAndOutputDockerfile(opt PlanOptions) error {
+	t, m := Plan(opt)
+	dockerfile, err := generateDockerfile(
+		&generateDockerfileOptions{
+			planType: t,
+			planMeta: m,
+		},
+	)
+	if err != nil {
+		log.Printf("Failed to generate Dockerfile: %s\n", err.Error())
+		return err
+	}
+	println(dockerfile)
+	// Remove .zeabur directory if exists
+	if err := os.RemoveAll(path.Join(*opt.Path, ".zeabur")); err != nil {
+		log.Printf("Failed to remove .zeabur directory: %s\n", err)
+		return err
+	}
+	return nil
 }

@@ -4,6 +4,7 @@ package dotnet
 import (
 	"bytes"
 	"embed"
+	"strings"
 	"text/template"
 
 	"github.com/zeabur/zbpack/pkg/packer"
@@ -12,9 +13,10 @@ import (
 
 // TemplateContext is the context for the Dotnet Dockerfile template.
 type TemplateContext struct {
-	DotnetVer string
-	Out       string
-	Static    bool
+	DotnetVer    string
+	Out          string
+	Static       bool
+	SubmoduleDir string
 }
 
 //go:embed templates
@@ -36,8 +38,9 @@ func (c TemplateContext) Execute() (string, error) {
 // GenerateDockerfile generates the Dockerfile for Dotnet projects.
 func GenerateDockerfile(meta types.PlanMeta) (string, error) {
 	context := TemplateContext{
-		DotnetVer: meta["sdk"],
-		Out:       meta["entryPoint"],
+		DotnetVer:    meta["sdk"],
+		Out:          strings.TrimSuffix(meta["entryPoint"], ".csproj"),
+		SubmoduleDir: meta["submoduleDir"],
 	}
 
 	if framework := meta["framework"]; framework == "blazorwasm" {

@@ -2,6 +2,8 @@
 package plan
 
 import (
+	"strconv"
+
 	"github.com/spf13/afero"
 	"github.com/zeabur/zbpack/pkg/types"
 )
@@ -19,12 +21,18 @@ type planner struct {
 
 // NewPlannerOptions is the options for NewPlanner.
 type NewPlannerOptions struct {
-	Source             afero.Fs
-	Config             ImmutableProjectConfiguration
-	SubmoduleName      string
-	CustomBuildCommand *string
-	CustomStartCommand *string
-	OutputDir          *string
+	Source        afero.Fs
+	Config        ImmutableProjectConfiguration
+	SubmoduleName string
+
+	AWSConfig *AWSConfig
+}
+
+// AWSConfig is the AWS configuration for fetching projects from S3 bucket.
+type AWSConfig struct {
+	Region          string
+	AccessKeyID     string
+	SecretAccessKey string
 }
 
 // NewPlanner creates a new Planner.
@@ -59,5 +67,7 @@ func (b planner) Plan() (types.PlanType, types.PlanMeta) {
 		}
 	}
 
-	return types.PlanTypeStatic, types.PlanMeta{}
+	serverless := Cast(b.NewPlannerOptions.Config.Get("serverless"), ToWeakBoolE).TakeOr(true)
+
+	return types.PlanTypeStatic, types.PlanMeta{"serverless": strconv.FormatBool(serverless)}
 }

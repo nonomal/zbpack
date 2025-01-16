@@ -1,0 +1,12 @@
+PlanType: bun
+
+Meta:
+  appDir: ""
+  buildCmd: ""
+  bun: "true"
+  bunVersion: "latest"
+  framework: "none"
+  installCmd: "COPY . .\nRUN bun install"
+  nodeVersion: "20"
+  packageManager: "bun"
+  startCmd: "bun run start"

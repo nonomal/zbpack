@@ -3,15 +3,16 @@ package zeaburpack
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"os/exec"
 	"path"
-	"sort"
+	"path/filepath"
 	"strconv"
 	"strings"
 
-	"github.com/pan93412/envexpander"
+	"github.com/samber/lo"
 	"github.com/zeabur/zbpack/pkg/types"
 )
 
@@ -22,84 +23,29 @@ type buildImageOptions struct {
 	AbsPath             string
 	UserVars            map[string]string
 	ResultImage         string
-	HandleLog           *func(log string)
 	PlainDockerProgress bool
 
 	CacheFrom *string
 	CacheTo   *string
 
-	// ProxyRegistry is the registry to be used for the image.
-	// See referenceConstructor for more details.
-	ProxyRegistry *string
-
 	// PushImage is a flag to indicate if the image should be pushed to the registry.
 	PushImage bool
+
+	// LogWriter is a [io.Writer] that will be written when a log is emitted.
+	// nil to use the default log writer.
+	LogWriter io.Writer
 }
 
+// ServerlessTarPath is the path to the serverless output tar file
+var ServerlessTarPath = filepath.Join(
+	lo.Must(os.MkdirTemp("", "zbpack-buildkit-artifact-*")),
+	"serverless-output.tar",
+)
+
 func buildImage(opt *buildImageOptions) error {
-	// resolve env variable statically and don't depend on Dockerfile's order
-	resolvedVars := envexpander.ResolveEnvVariable(opt.UserVars)
-
-	refConstructor := newReferenceConstructor(opt.ProxyRegistry)
-	lines := strings.Split(opt.Dockerfile, "\n")
-	stageLines := make([]int, 0)
-
-	for i, line := range lines {
-		fromStatement, isFromStatement := ParseFrom(line)
-		if !isFromStatement {
-			continue
-		}
-
-		// Construct the reference.
-		newRef := refConstructor.Construct(fromStatement.Source)
-
-		// Replace this FROM line.
-		fromStatement.Source = newRef
-		lines[i] = fromStatement.String()
-
-		// Mark this FROM line as a stage.
-		if stage, ok := fromStatement.Stage.Get(); ok {
-			refConstructor.AddStage(stage)
-		}
-		stageLines = append(stageLines, i)
+	if opt.LogWriter == nil {
+		opt.LogWriter = os.Stderr
 	}
-
-	// sort the resolvedVars by key so we can build
-	// the reproducible dockerfile
-	sortedResolvedVarsKey := make([]string, 0, len(resolvedVars))
-	for key := range resolvedVars {
-		sortedResolvedVarsKey = append(sortedResolvedVarsKey, key)
-	}
-	sort.Strings(sortedResolvedVarsKey)
-
-	// build the dockerfile
-	dockerfileEnv := ""
-
-	// Inject CI env so everyone knows that we are a CI.
-	if _, ok := resolvedVars["CI"]; !ok {
-		dockerfileEnv += "ENV CI true\n"
-	}
-
-	for _, key := range sortedResolvedVarsKey {
-		value := resolvedVars[key]
-
-		// skip empty value
-		if len(value) == 0 {
-			continue
-		}
-
-		value = strings.ReplaceAll(value, "\n", "\\n")
-		value = strings.ReplaceAll(value, "'", "\\'")
-		value = strings.ReplaceAll(value, "\"", "\\\"")
-		value = strings.ReplaceAll(value, "\\", "\\\\")
-
-		dockerfileEnv += "ENV " + key + " \"" + value + "\"\n"
-	}
-
-	for _, stageLine := range stageLines {
-		lines[stageLine] = lines[stageLine] + "\n" + dockerfileEnv + "\n"
-	}
-	newDockerfile := strings.Join(lines, "\n")
 
 	tempDir := os.TempDir()
 	buildID := strconv.Itoa(rand.Int())
@@ -110,7 +56,7 @@ func buildImage(opt *buildImageOptions) error {
 	}
 
 	dockerfilePath := path.Join(tempDir, buildID, "Dockerfile")
-	err = os.WriteFile(dockerfilePath, []byte(newDockerfile), 0o644)
+	err = os.WriteFile(dockerfilePath, []byte(opt.Dockerfile), 0o644)
 	if err != nil {
 		return fmt.Errorf("write Dockerfile: %w", err)
 	}
@@ -129,8 +75,8 @@ func buildImage(opt *buildImageOptions) error {
 		"--local", "dockerfile=" + path.Dir(dockerfilePath),
 	}
 
-	if opt.PlanMeta["serverless"] == "true" || opt.PlanMeta["outputDir"] != "" || opt.PlanType == types.PlanTypeStatic {
-		buildKitCmd = append(buildKitCmd, "--output", "type=local,dest="+path.Join(os.TempDir(), "zbpack/buildkit"))
+	if opt.PlanMeta["serverless"] == "true" || opt.PlanType == types.PlanTypeNix {
+		buildKitCmd = append(buildKitCmd, "--output", "type=tar,dest="+ServerlessTarPath)
 	} else {
 		t := "image"
 		if !opt.PushImage {
@@ -146,11 +92,11 @@ func buildImage(opt *buildImageOptions) error {
 	}
 
 	if opt.CacheFrom != nil && len(*opt.CacheFrom) > 0 {
-		buildKitCmd = append(buildKitCmd, "--import-cache type=registry,ref="+*opt.CacheFrom)
+		buildKitCmd = append(buildKitCmd, "--import-cache", "type=registry,ref="+*opt.CacheFrom)
 	}
 
 	if opt.CacheTo != nil && len(*opt.CacheTo) > 0 {
-		buildKitCmd = append(buildKitCmd, "--export-cache", *opt.CacheTo)
+		buildKitCmd = append(buildKitCmd, "--export-cache", "type=registry,ref="+*opt.CacheTo)
 	}
 
 	if opt.PlainDockerProgress {
@@ -160,7 +106,7 @@ func buildImage(opt *buildImageOptions) error {
 	}
 
 	buildctlCmd := exec.Command("buildctl", buildKitCmd...)
-	buildctlCmd.Stderr = NewHandledWriter(os.Stderr, opt.HandleLog)
+	buildctlCmd.Stderr = opt.LogWriter
 	output, err := buildctlCmd.Output()
 	if err != nil {
 		return fmt.Errorf("run buildctl build: %w", err)
@@ -172,8 +118,8 @@ func buildImage(opt *buildImageOptions) error {
 
 	dockerLoadCmd := exec.Command("docker", "load")
 	dockerLoadCmd.Stdin = bytes.NewReader(output)
-	dockerLoadCmd.Stdout = NewHandledWriter(os.Stdout, opt.HandleLog)
-	dockerLoadCmd.Stderr = NewHandledWriter(os.Stderr, opt.HandleLog)
+	dockerLoadCmd.Stdout = opt.LogWriter
+	dockerLoadCmd.Stderr = opt.LogWriter
 	if err := dockerLoadCmd.Run(); err != nil {
 		return fmt.Errorf("run docker load: %w", err)
 	}

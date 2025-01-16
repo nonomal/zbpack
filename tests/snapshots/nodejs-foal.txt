@@ -1,0 +1,11 @@
+PlanType: nodejs
+
+Meta:
+  appDir: ""
+  buildCmd: "pnpm run build"
+  bun: "false"
+  framework: "none"
+  installCmd: "COPY . .\nRUN pnpm install"
+  nodeVersion: "18"
+  packageManager: "pnpm"
+  startCmd: "pnpm start"

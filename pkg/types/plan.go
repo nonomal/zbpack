@@ -1,6 +1,8 @@
 // Package types is the type definitions for the build plan in Zbpack.
 package types
 
+import "slices"
+
 // PlanType is primary category of the build plan.
 // For example, the programing language or the runtime.
 type PlanType string
@@ -22,9 +24,20 @@ const (
 	PlanTypeRust   PlanType = "rust"
 	PlanTypeDotnet PlanType = "dotnet"
 	PlanTypeElixir PlanType = "elixir"
+	PlanTypeGleam  PlanType = "gleam"
 	PlanTypeBun    PlanType = "bun"
 	PlanTypeStatic PlanType = "static"
 	PlanTypeSwift  PlanType = "swift"
+	PlanTypeDart   PlanType = "dart"
+	PlanTypeNix    PlanType = "nix"
+)
+
+type DartFramework string
+
+const (
+	DartFrameworkFlutter   DartFramework = "flutter"
+	DartFrameworkServerpod DartFramework = "serverpod"
+	DartFrameworkNone      DartFramework = "none"
 )
 
 //revive:enable:exported
@@ -63,15 +76,34 @@ const (
 	NodeProjectFrameworkNestJs           NodeProjectFramework = "nest.js"
 	NodeProjectFrameworkHexo             NodeProjectFramework = "hexo"
 	NodeProjectFrameworkVitepress        NodeProjectFramework = "vitepress"
+	NodeProjectFrameworkAstro            NodeProjectFramework = "astro"
 	NodeProjectFrameworkAstroStatic      NodeProjectFramework = "astro-static"
 	NodeProjectFrameworkAstroSSR         NodeProjectFramework = "astro-ssr"
+	NodeProjectFrameworkAstroStarlight   NodeProjectFramework = "astro-starlight"
 	NodeProjectFrameworkSliDev           NodeProjectFramework = "sli.dev"
 	NodeProjectFrameworkDocusaurus       NodeProjectFramework = "docusaurus"
 	NodeProjectFrameworkSolidStart       NodeProjectFramework = "solid-start"
+	NodeProjectFrameworkSolidStartVinxi  NodeProjectFramework = "solid-start-vinxi"
 	NodeProjectFrameworkSolidStartNode   NodeProjectFramework = "solid-start-node"
 	NodeProjectFrameworkSolidStartStatic NodeProjectFramework = "solid-start-static"
 	NodeProjectFrameworkNueJs            NodeProjectFramework = "nuejs"
+	NodeProjectFrameworkVocs             NodeProjectFramework = "vocs"
+	NodeProjectFrameworkRspress          NodeProjectFramework = "rspress"
+	NodeProjectFrameworkGrammY           NodeProjectFramework = "grammy"
+	NodeProjectFrameworkNitropack        NodeProjectFramework = "nitropack"
 )
+
+var NitroBasedFrameworks = []NodeProjectFramework{
+	NodeProjectFrameworkNuxtJs,
+	NodeProjectFrameworkNitropack,
+	NodeProjectFrameworkSolidStartVinxi,
+}
+
+func IsNitroBasedFramework(framework string) bool {
+	return slices.ContainsFunc(NitroBasedFrameworks, func(f NodeProjectFramework) bool {
+		return string(f) == framework
+	})
+}
 
 //revive:enable:exported
 
@@ -83,11 +115,15 @@ const (
 	PythonFrameworkFlask   PythonFramework = "flask"
 	PythonFrameworkDjango  PythonFramework = "django"
 	PythonFrameworkFastapi PythonFramework = "fastapi"
+	PythonFrameworkTornado PythonFramework = "tornado"
 	PythonFrameworkSanic   PythonFramework = "sanic"
 	PythonFrameworkNone    PythonFramework = "none"
 
 	// PythonFrameworkStreamlit https://github.com/streamlit/streamlit
 	PythonFrameworkStreamlit PythonFramework = "streamlit"
+
+	// PythonFrameworkReflex https://github.com/reflex-dev/reflex
+	PythonFrameworkReflex PythonFramework = "reflex"
 )
 
 //revive:enable:exported
@@ -102,6 +138,8 @@ const (
 	PythonPackageManagerPoetry  PythonPackageManager = "poetry"
 	PythonPackageManagerPipenv  PythonPackageManager = "pipenv"
 	PythonPackageManagerPdm     PythonPackageManager = "pdm"
+	PythonPackageManagerRye     PythonPackageManager = "rye"
+	PythonPackageManagerUv      PythonPackageManager = "uv"
 )
 
 type SwiftFramework string
@@ -146,26 +184,10 @@ const (
 	PHPFrameworkNone        PHPFramework = "none"
 	PHPFrameworkThinkphp    PHPFramework = "thinkphp"
 	PHPFrameworkCodeigniter PHPFramework = "codeigniter"
+	PHPFrameworkSymfony     PHPFramework = "symfony"
 )
 
 //revive:enable:exported
-
-// PHPApplication represents the application type of a PHP project.
-type PHPApplication string
-
-// PHPProperty represents the property flag of a PHP project.
-type PHPProperty uint64
-
-//revive:disable:exported
-const (
-	PHPApplicationDefault PHPApplication = "default"
-	PHPApplicationAcgFaka PHPApplication = "acg-faka"
-)
-
-const (
-	PHPPropertyNone     PHPProperty = iota
-	PHPPropertyComposer PHPProperty = 1 << (iota - 1)
-)
 
 // RubyFramework represents the framework of a Ruby project.
 //
@@ -221,5 +243,6 @@ const (
 	BunFrameworkElysia BunFramework = "elysia"
 	BunFrameworkBaojs  BunFramework = "baojs"
 	BunFrameworkBagel  BunFramework = "bagel"
+	BunFrameworkHono   BunFramework = "hono"
 	BunFrameworkNone   BunFramework = "none"
 )

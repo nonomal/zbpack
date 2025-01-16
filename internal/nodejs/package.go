@@ -5,11 +5,13 @@ import (
 	"fmt"
 
 	"github.com/spf13/afero"
+	"github.com/zeabur/zbpack/internal/utils"
 )
 
 // PackageJSONEngine is the structure of `package.json`'s `engines` field.
 type PackageJSONEngine struct {
 	Node string `json:"node"`
+	Bun  string `json:"bun,omitempty"`
 }
 
 // PackageJSON is the structure of `package.json`.
@@ -21,6 +23,9 @@ type PackageJSON struct {
 	Engines         PackageJSONEngine `json:"engines"`
 	Main            string            `json:"main"`
 	Module          string            `json:"module"`
+
+	// yarn workspace
+	Workspaces []string `json:"workspaces,omitempty"`
 }
 
 // NewPackageJSON returns a new instance of PackageJson
@@ -39,7 +44,7 @@ func NewPackageJSON() PackageJSON {
 func DeserializePackageJSON(source afero.Fs) (PackageJSON, error) {
 	p := NewPackageJSON()
 
-	packageJSONMarshal, err := afero.ReadFile(source, "package.json")
+	packageJSONMarshal, err := utils.ReadFileToUTF8(source, "package.json")
 	if err != nil {
 		return p, fmt.Errorf("read file: %w", err)
 	}

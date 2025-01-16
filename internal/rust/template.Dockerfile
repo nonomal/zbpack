@@ -1,59 +1,55 @@
-FROM docker.io/lukemathwalker/cargo-chef:latest-rust-1 AS chef
-WORKDIR /src
+FROM rust:1 AS builder
 
-# use sparse to speed up the dependencies download process
-ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+WORKDIR /app
+COPY . /app
 
-# use lld as the linker
-RUN apt update \
-  && apt install -y lld
+{{ if ne .BuildCommand "" }}
+RUN {{ .BuildCommand }}
+{{ end }}
 
-RUN mkdir /.cargo && \
-  printf '[build]\nrustflags = ["-C", "link-arg=-fuse-ld=lld"]\n' > /.cargo/config.toml
+# output to /out/bin
+RUN mkdir /out && cargo install --path "{{ .AppDir }}" --root /out
 
-FROM chef AS planner
-COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
+FROM rust:1 AS post-builder
 
-FROM chef AS builder
-COPY --from=planner /src/recipe.json recipe.json
+COPY --from=builder /out/bin /app
 
-# Build dependencies - this is the caching Docker layer!
-RUN cargo chef cook --release --recipe-path recipe.json
+{{ range .Assets }}
+COPY --from=builder /app/{{ . }} /app/{{ . }}
+{{ end }}
 
-# Build the project to get the executable file
-COPY . .
-RUN cargo build --release
+WORKDIR /app
 
-# Copy the exe and files listed in .zeabur-preserve to /app/bin
-RUN mkdir -p /app/bin \
-  # move the files to preserve to /app
-  && (cat .zeabur-preserve | xargs -I {} cp -r {} /app/{}) \
-  # move the binary to the root of the container
-  && (cp target/release/* /app/bin || true)
+# Rename the entry point to /app/main
+RUN if [ -x "{{ .Entry }}" ]; then \
+	mv "{{ .Entry }}" /app/main; \
+  else \
+  	real_endpoint="$(find . -type f -executable -print | head -n 1)" \
+		&& mv "${real_endpoint}" /app/main; \
+  fi
 
-FROM docker.io/library/debian:bookworm-slim AS runtime
 
-# {{if eq .NeedOpenssl "yes"}}
+{{ if .Serverless }}
+FROM scratch
+COPY --from=post-builder /app .
+{{ else }}
+FROM rust:1-slim AS runtime
+
+{{ if .OpenSSL }}
 RUN apt-get update \
   && apt-get install -y openssl \
   && rm -rf /var/lib/apt/lists/*
-# {{ end }}
+{{ end }}
 
-ENV BINDIR="/app/bin"
-ENV BINNAME="{{ .BinName }}"
-ENV EXEFILE="${BINDIR}/${BINNAME}"
+{{ if ne .PreStartCommand "" }}
+RUN {{ .PreStartCommand }}
+{{ end }}
 
-RUN useradd -m -s /bin/bash zeabur
-COPY --from=builder --chown=zeabur:zeabur /app /app
+COPY --from=post-builder /app /app
+{{ if ne .StartCommand "" }}
+CMD {{ .StartCommand }}
+{{ else }}
+CMD ["/app/main"]
+{{ end }}
 
-USER zeabur
-WORKDIR /app
-
-RUN if [ ! -x "${EXEFILE}" ]; then \
-    find . -type f -executable -print | head -n 1 > EXEFILE; \
-  else \
-    echo "${EXEFILE}" > EXEFILE; \
-  fi
-
-CMD "$(cat EXEFILE)"
+{{ end }}

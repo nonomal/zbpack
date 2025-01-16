@@ -4,6 +4,7 @@ package nodejs
 import (
 	"bytes"
 	"embed"
+	"strings"
 	"text/template"
 
 	"github.com/zeabur/zbpack/pkg/packer"
@@ -13,6 +14,9 @@ import (
 // TemplateContext is the context for the Node.js Dockerfile template.
 type TemplateContext struct {
 	NodeVersion string
+	BunVersion  string
+
+	AppDir string
 
 	InstallCmd string
 	BuildCmd   string
@@ -30,6 +34,10 @@ var tmplFs embed.FS
 
 var tmpl = template.Must(
 	template.New("template.Dockerfile").
+		Funcs(template.FuncMap{
+			"prefixed": strings.HasPrefix,
+			"isNitro":  types.IsNitroBasedFramework,
+		}).
 		ParseFS(tmplFs, "templates/*"),
 )
 
@@ -44,6 +52,7 @@ func (c TemplateContext) Execute() (string, error) {
 func getContextBasedOnMeta(meta types.PlanMeta) TemplateContext {
 	context := TemplateContext{
 		NodeVersion: meta["nodeVersion"],
+		AppDir:      meta["appDir"],
 		InstallCmd:  meta["installCmd"],
 		BuildCmd:    meta["buildCmd"],
 		StartCmd:    meta["startCmd"],
@@ -52,7 +61,8 @@ func getContextBasedOnMeta(meta types.PlanMeta) TemplateContext {
 		OutputDir:   meta["outputDir"],
 
 		// The flag specific to planner/bun.
-		Bun: meta["bun"] == "true",
+		Bun:        meta["bun"] == "true" || meta["packageManager"] == "bun",
+		BunVersion: meta["bunVersion"],
 	}
 
 	return context

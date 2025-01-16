@@ -2,14 +2,26 @@ package golang
 
 import (
 	"bufio"
+	"os"
 	"path"
+	"strconv"
 
 	"github.com/moznion/go-optional"
 	"github.com/spf13/afero"
+	"github.com/spf13/cast"
 	"github.com/zeabur/zbpack/internal/utils"
 	"github.com/zeabur/zbpack/pkg/plan"
 	"github.com/zeabur/zbpack/pkg/types"
 )
+
+// ConfigGoEntry specifies the entry point of the a Go application.
+//
+// You should specify a full path to the entry point file, for example,
+// "cmd/server/main.go" or "app.go".
+//
+// If this key is not set, we discover it from "/main.go" and
+// "/cmd/<submodule>/main.go"
+const ConfigGoEntry = "go.entry"
 
 type goPlanContext struct {
 	Src    afero.Fs
@@ -21,6 +33,31 @@ type goPlanContext struct {
 	Entry     optional.Option[string]
 
 	Serverless optional.Option[bool]
+}
+
+const (
+	// ConfigCgo indicates if cgo and its toolchains should be enabled.
+	ConfigCgo = "go.cgo"
+)
+
+func getBuildCommand(ctx *goPlanContext) string {
+	if buildCommand, err := plan.Cast(ctx.Config.Get(plan.ConfigBuildCommand), cast.ToStringE).Take(); err == nil {
+		return buildCommand
+	}
+
+	return ""
+}
+
+func isCgoEnabled(ctx *goPlanContext) bool {
+	if cgo, err := plan.Cast(ctx.Config.Get(ConfigCgo), cast.ToBoolE).Take(); err == nil && cgo {
+		return true
+	}
+
+	if os.Getenv("CGO_ENABLED") == "1" {
+		return true
+	}
+
+	return false
 }
 
 func getGoVersion(ctx *goPlanContext) string {
@@ -57,6 +94,11 @@ func getEntry(ctx *goPlanContext) string {
 	ent := &ctx.Entry
 	if entry, err := ent.Take(); err == nil {
 		return entry
+	}
+
+	if entry, err := plan.Cast(ctx.Config.Get(ConfigGoEntry), cast.ToStringE).Take(); err == nil {
+		*ent = optional.Some(entry)
+		return ent.Unwrap()
 	}
 
 	// in a basic go project, we assume the entrypoint is main.go in root directory
@@ -104,6 +146,12 @@ func GetMeta(opt GetMetaOptions) types.PlanMeta {
 
 	entry := getEntry(ctx)
 	meta["entry"] = entry
+
+	if buildCommand := getBuildCommand(ctx); buildCommand != "" {
+		meta["buildCommand"] = buildCommand
+	}
+
+	meta["cgo"] = strconv.FormatBool(isCgoEnabled(ctx))
 
 	serverless := getServerless(ctx)
 	if serverless {

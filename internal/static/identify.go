@@ -1,10 +1,11 @@
 package static
 
 import (
-	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/afero"
+	"github.com/spf13/cast"
 
 	"github.com/zeabur/zbpack/internal/utils"
 	"github.com/zeabur/zbpack/pkg/plan"
@@ -24,37 +25,49 @@ func (i *identify) PlanType() types.PlanType {
 }
 
 func (i *identify) Match(fs afero.Fs) bool {
-	return utils.HasFile(fs, "index.html", "hugo.toml", "config/_default/hugo.toml", "config.toml")
+	return utils.HasFile(fs, "index.html", "hugo.toml", "config/_default/hugo.toml", "config.toml", "mkdocs.yml")
 }
 
 func (i *identify) PlanMeta(options plan.NewPlannerOptions) types.PlanMeta {
+	serverless := utils.GetExplicitServerlessConfig(options.Config).TakeOr(true)
+
+	planMeta := types.PlanMeta{"serverless": strconv.FormatBool(serverless)}
 
 	if utils.HasFile(options.Source, "hugo.toml", "config/_default/hugo.toml") {
-		return types.PlanMeta{"framework": "hugo"}
+		planMeta["framework"] = "hugo"
+		return planMeta
+	}
+
+	if utils.HasFile(options.Source, "mkdocs.yml") {
+		planMeta["framework"] = "mkdocs"
+		return planMeta
 	}
 
 	if utils.HasFile(options.Source, "config.toml") {
-		config, err := afero.ReadFile(options.Source, "config.toml")
+		config, err := utils.ReadFileToUTF8(options.Source, "config.toml")
 		if err == nil && strings.Contains(string(config), "base_url") {
 			ver := "0.18.0"
-			if os.Getenv("ZOLA_VERSION") != "" {
-				ver = os.Getenv("ZOLA_VERSION")
+
+			if userSetVersion, err := plan.Cast(
+				options.Config.Get("zola_version"), cast.ToStringE,
+			).Take(); err == nil {
+				ver = userSetVersion
 			}
-			return types.PlanMeta{"framework": "zola", "version": ver}
+
+			planMeta["framework"] = "zola"
+			planMeta["version"] = ver
+			return planMeta
 		}
 	}
 
-	html, err := afero.ReadFile(options.Source, "index.html")
-
-	if err == nil && strings.Contains(string(html), "Hugo") {
-		return types.PlanMeta{"framework": "hugo"}
-	}
+	html, err := utils.ReadFileToUTF8(options.Source, "index.html")
 
 	if err == nil && strings.Contains(string(html), "Hexo") {
-		return types.PlanMeta{"framework": "hexo"}
+		planMeta["framework"] = "hexo"
+		return planMeta
 	}
 
-	return types.PlanMeta{"framework": "unknown"}
+	return planMeta
 }
 
 var _ plan.Identifier = (*identify)(nil)

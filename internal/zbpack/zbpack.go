@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/samber/lo"
 	"github.com/spf13/cobra"
 	"github.com/zeabur/zbpack/pkg/zeaburpack"
 )
@@ -15,7 +16,11 @@ import (
 var (
 	// info option is used to analyze and print project information.
 	info bool
-	cmd  = &cobra.Command{
+	// dockerfile option is used to generate a Dockerfile.
+	dockerfile bool
+	// userSubmoduleName option is used to specify the submodule name of this project manually
+	userSubmoduleName string
+	cmd               = &cobra.Command{
 		Use:   "zbpack",
 		Short: "Zbpack is a tool to help you analyze your project and build Docker image in one click.",
 		Long: "Zbpack is a powerful tool that not only analyzes your project for dependencies and requirements, " +
@@ -26,7 +31,7 @@ var (
 			}
 			return nil
 		},
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			return run(args)
 		},
 	}
@@ -34,6 +39,8 @@ var (
 
 func init() {
 	cmd.PersistentFlags().BoolVarP(&info, "info", "i", false, "only print project information")
+	cmd.PersistentFlags().BoolVarP(&dockerfile, "dockerfile", "d", false, "output dockerfile")
+	cmd.PersistentFlags().StringVar(&userSubmoduleName, "submodule", "", "submodule (service) name. by default, it is picked from the directory name.")
 	cmd.SetUsageTemplate(usageTemplate)
 }
 
@@ -49,6 +56,8 @@ func run(args []string) error {
 	switch {
 	case info:
 		return plan(path)
+	case dockerfile:
+		return PlanAndOutputDockerfile(path)
 	default:
 		return build(path)
 	}
@@ -56,7 +65,6 @@ func run(args []string) error {
 
 // build is used to build Docker image and show build plan.
 func build(path string) error {
-
 	// before start, check if buildctl is installed and buildkitd is running
 	err := exec.Command("buildctl", "debug", "workers").Run()
 	if err != nil {
@@ -87,13 +95,29 @@ func build(path string) error {
 		log.Fatalln(err)
 	}
 
-	trueValue := true
+	log.Printf("using submoduleName: %s", submoduleName)
+
+	userVarsList := os.Environ()
+	userVarsToBuild := make(map[string]string)
+	for _, userVar := range userVarsList {
+		key, value, ok := strings.Cut(userVar, "=")
+		if !ok {
+			continue
+		}
+
+		if key, ok := strings.CutPrefix(key, "ZBPACK_VAR_"); ok {
+			userVarsToBuild[key] = value
+		}
+	}
+
+	log.Printf("environment variables to pass: %+v", userVarsToBuild)
 
 	return zeaburpack.Build(
 		&zeaburpack.BuildOptions{
 			Path:          &path,
-			Interactive:   &trueValue,
+			Interactive:   lo.ToPtr(true),
 			SubmoduleName: &submoduleName,
+			UserVars:      &userVarsToBuild,
 		},
 	)
 }
@@ -105,20 +129,48 @@ func plan(path string) error {
 		log.Fatalln(err)
 	}
 
-	githubToken := os.Getenv("GITHUB_ACCESS_TOKEN")
-	if strings.HasPrefix(path, "https://github.com") && githubToken == "" {
-		return fmt.Errorf("GITHUB_ACCESS_TOKEN is required for GitHub URL")
+	log.Printf("using submoduleName: %s", submoduleName)
+
+	var githubToken *string
+	githubTokenStr := os.Getenv("GITHUB_ACCESS_TOKEN")
+	if githubTokenStr != "" {
+		githubToken = &githubTokenStr
 	}
 
 	t, m := zeaburpack.Plan(
 		zeaburpack.PlanOptions{
 			SubmoduleName: &submoduleName,
 			Path:          &path,
-			AccessToken:   &githubToken,
+			AccessToken:   githubToken,
 		},
 	)
 
-	zeaburpack.PrintPlanAndMeta(t, m, func(info string) { log.Println(info) })
+	zeaburpack.PrintPlanAndMeta(t, m, os.Stderr)
 
 	return nil
+}
+
+// PlanAndOutputDockerfile is used to generate Dockerfile and output it.
+func PlanAndOutputDockerfile(path string) error {
+	submoduleName, err := GetSubmoduleName(path)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	log.Printf("using submoduleName: %s", submoduleName)
+
+	var githubToken *string
+	githubTokenStr := os.Getenv("GITHUB_ACCESS_TOKEN")
+	if githubTokenStr != "" {
+		githubToken = &githubTokenStr
+	}
+
+	// Plan and output Dockerfile
+	return zeaburpack.PlanAndOutputDockerfile(
+		zeaburpack.PlanOptions{
+			SubmoduleName: &submoduleName,
+			Path:          &path,
+			AccessToken:   githubToken,
+		},
+	)
 }

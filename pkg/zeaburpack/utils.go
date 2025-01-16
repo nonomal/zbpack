@@ -3,8 +3,10 @@ package zeaburpack
 import (
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/spf13/afero"
 	"github.com/zeabur/zbpack/internal/source"
 
@@ -18,7 +20,7 @@ const (
 )
 
 // PrintPlanAndMeta prints the build plan and meta in a table format.
-func PrintPlanAndMeta(plan types.PlanType, meta types.PlanMeta, printFunc func(log string)) {
+func PrintPlanAndMeta(plan types.PlanType, meta types.PlanMeta, writer io.Writer) {
 	table := fmt.Sprintf(
 		"\n%s╔══════════════════════════════ %s%s %s═════════════════════════════╗\n",
 		blue, yellow, "Build Plan", blue,
@@ -62,18 +64,26 @@ func PrintPlanAndMeta(plan types.PlanType, meta types.PlanMeta, printFunc func(l
 		blue, reset,
 	)
 
-	printFunc(table)
+	_, _ = writer.Write([]byte(table))
 }
 
 // getGitHubSourceFromURL returns a GitHub source from a GitHub URL.
-func getGitHubSourceFromURL(url, token string) (afero.Fs, error) {
-	parts := strings.Split(url, "/")
+func getGitHubSourceFromURL(url string, token *string) (afero.Fs, error) {
+	repoAddress, ref, _ := strings.Cut(url, "#")
+	parts := strings.Split(repoAddress, "/")
 	if len(parts) < 5 {
 		return nil, errors.New("invalid GitHub URL")
 	}
 	repoOwner := parts[3]
 	repoName := parts[4]
 
-	src := source.NewGitHubFs(repoOwner, repoName, token)
-	return src, nil
+	if ref != "" {
+		return source.NewGitHubFs(repoOwner, repoName, token, source.GitHubRef(ref))
+	}
+
+	return source.NewGitHubFs(repoOwner, repoName, token)
+}
+
+func getS3SourceFromURL(url string, cfg *aws.Config) afero.Fs {
+	return source.NewS3Fs(url, cfg)
 }

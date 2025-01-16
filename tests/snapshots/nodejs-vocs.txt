@@ -1,0 +1,13 @@
+PlanType: nodejs
+
+Meta:
+  appDir: ""
+  buildCmd: "pnpm run build"
+  bun: "false"
+  framework: "vocs"
+  installCmd: "COPY . .\nRUN pnpm install"
+  nodeVersion: "20"
+  outputDir: "docs/dist"
+  packageManager: "pnpm"
+  serverless: "true"
+  startCmd: ""

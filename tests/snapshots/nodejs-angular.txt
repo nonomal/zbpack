@@ -1,0 +1,13 @@
+PlanType: nodejs
+
+Meta:
+  appDir: ""
+  buildCmd: "npm run build"
+  bun: "false"
+  framework: "angular"
+  installCmd: "COPY . .\nRUN npm install"
+  nodeVersion: "20"
+  outputDir: "dist/angular-template/browser"
+  packageManager: "npm"
+  serverless: "true"
+  startCmd: ""

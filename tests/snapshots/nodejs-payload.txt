@@ -1,0 +1,12 @@
+PlanType: nodejs
+
+Meta:
+  appDir: ""
+  buildCmd: "yarn build"
+  bun: "false"
+  framework: "next.js"
+  installCmd: "COPY . .\nRUN yarn install"
+  nodeVersion: "20"
+  packageManager: "yarn"
+  serverless: "true"
+  startCmd: ""

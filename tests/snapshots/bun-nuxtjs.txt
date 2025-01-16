@@ -1,0 +1,13 @@
+PlanType: bun
+
+Meta:
+  appDir: ""
+  buildCmd: "NITRO_PRESET=node bun run build"
+  bun: "true"
+  bunVersion: "latest"
+  framework: "nuxt.js"
+  installCmd: "COPY . .\nRUN bun install"
+  nodeVersion: "20"
+  packageManager: "bun"
+  serverless: "true"
+  startCmd: ""
